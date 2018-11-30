@@ -27,7 +27,7 @@ import java.util.List;
 @SuppressWarnings("unused")
 @RestController
 @RequestMapping("databases")
-@Api(value = "Databases", description = "Operations for getting information about objects stored in database")
+@Api(tags = {"Databases"})
 public class DatabaseObjectController {
     private static final String[] STRING_DEF_MAP = new String[0];
     private static final DatabaseObject[] TABLE_DEF_MAP = new DatabaseObject[0];

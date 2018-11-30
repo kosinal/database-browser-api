@@ -102,9 +102,9 @@ public class DatabaseServiceImpl implements DatabaseService {
     private List<DatabaseObject> listTables(ConnectionProperties connectionProperties,
                                             String catalogName,
                                             String schemaName) {
-        try (Connection con = establishConnection(connectionProperties)) {
+        try (Connection con = establishConnection(connectionProperties);
+             ResultSet tables = con.getMetaData().getTables(catalogName, schemaName, null, null)) {
             final List<DatabaseObject> dbObjectsList = new ArrayList<>();
-            final ResultSet tables = con.getMetaData().getTables(catalogName, schemaName, null, null);
             while (tables.next()) {
                 dbObjectsList.add(
                         new DatabaseObject(
@@ -127,9 +127,9 @@ public class DatabaseServiceImpl implements DatabaseService {
      */
     @SneakyThrows
     private List<String> listSchemas(ConnectionProperties connectionProperties, String catalogName) {
-        try (Connection con = establishConnection(connectionProperties)) {
+        try (Connection con = establishConnection(connectionProperties);
+             final ResultSet schemas = con.getMetaData().getSchemas(catalogName, null)) {
             final List<String> schemasList = new ArrayList<>();
-            final ResultSet schemas = con.getMetaData().getSchemas(catalogName, null);
             while (schemas.next()) {
                 schemasList.add(schemas.getString("TABLE_SCHEM"));
             }
@@ -145,9 +145,9 @@ public class DatabaseServiceImpl implements DatabaseService {
      */
     @SneakyThrows
     private List<String> listCatalogs(ConnectionProperties connectionProperties) {
-        try (Connection con = establishConnection(connectionProperties)) {
+        try (Connection con = establishConnection(connectionProperties);
+             final ResultSet catalogs = con.getMetaData().getCatalogs()) {
             final List<String> catalogList = new ArrayList<>();
-            final ResultSet catalogs = con.getMetaData().getCatalogs();
             while (catalogs.next()) {
                 catalogList.add(catalogs.getString("TABLE_CAT"));
             }
@@ -179,15 +179,16 @@ public class DatabaseServiceImpl implements DatabaseService {
                                         String schemaName,
                                         String tableName) throws SQLException {
         final Set<String> columns = new HashSet<>();
-        final ResultSet primaryKeys = con.getMetaData().getPrimaryKeys(
+        try (ResultSet primaryKeys = con.getMetaData().getPrimaryKeys(
                 catalogName,
                 schemaName,
-                tableName
-        );
-        while (primaryKeys.next()) {
-            columns.add(primaryKeys.getString("COLUMN_NAME"));
+                tableName)
+        ) {
+            while (primaryKeys.next()) {
+                columns.add(primaryKeys.getString("COLUMN_NAME"));
+            }
+            return columns;
         }
-        return columns;
     }
 
     /**
@@ -221,28 +222,29 @@ public class DatabaseServiceImpl implements DatabaseService {
     private List<TableColumn> listColumns(Connection con, String catalogName, String schemaName, String tableName) throws SQLException {
         final Set<String> primaryKeys = listPrimaryKeys(con, catalogName, schemaName, tableName);
         final List<TableColumn> columnList = new ArrayList<>();
-        final ResultSet columns = con.getMetaData().getColumns(
+        try (ResultSet columns = con.getMetaData().getColumns(
                 catalogName,
                 schemaName,
                 tableName,
-                null
-        );
-        while (columns.next()) {
-            final String columnName = columns.getString("COLUMN_NAME");
-            columnList.add(
-                    new TableColumn(
-                            columns.getInt("ORDINAL_POSITION"),
-                            columnName,
-                            typeNames.get(columns.getInt("DATA_TYPE")),
-                            columns.getInt("COLUMN_SIZE"),
-                            columns.getString("IS_NULLABLE"),
-                            primaryKeys.contains(columnName),
-                            columns.getString("REMARKS"),
-                            columns.getInt("DECIMAL_DIGITS")
-                    )
-            );
+                null)
+        ) {
+            while (columns.next()) {
+                final String columnName = columns.getString("COLUMN_NAME");
+                columnList.add(
+                        new TableColumn(
+                                columns.getInt("ORDINAL_POSITION"),
+                                columnName,
+                                typeNames.get(columns.getInt("DATA_TYPE")),
+                                columns.getInt("COLUMN_SIZE"),
+                                columns.getString("IS_NULLABLE"),
+                                primaryKeys.contains(columnName),
+                                columns.getString("REMARKS"),
+                                columns.getInt("DECIMAL_DIGITS")
+                        )
+                );
+            }
+            return columnList;
         }
-        return columnList;
     }
 
     /**
@@ -292,23 +294,24 @@ public class DatabaseServiceImpl implements DatabaseService {
                                            String catalogName,
                                            String schemaName,
                                            String tableName) {
-        try (Connection con = establishConnection(connectionProperties)) {
-            Statement statement = con.createStatement();
+        try (Connection con = establishConnection(connectionProperties);
+             Statement statement = con.createStatement()) {
             final int fetchSize = 20;
             statement.setFetchSize(fetchSize);
             statement.setMaxRows(fetchSize);
             List<List<String>> retResults = new ArrayList<>();
-            final ResultSet rs = statement.executeQuery(
+            try (ResultSet rs = statement.executeQuery(
                     String.format("select * from %s", createFullTableName(catalogName, schemaName, tableName))
-            );
-            int columnCount = rs.getMetaData().getColumnCount();
-            while (rs.next()) {
-                List<String> resLine = IntStream.rangeClosed(1, columnCount)
-                        .mapToObj(i -> extractFromResultSet(rs, i))
-                        .collect(Collectors.toList());
-                retResults.add(resLine);
+            )) {
+                int columnCount = rs.getMetaData().getColumnCount();
+                while (rs.next()) {
+                    List<String> resLine = IntStream.rangeClosed(1, columnCount)
+                            .mapToObj(i -> extractFromResultSet(rs, i))
+                            .collect(Collectors.toList());
+                    retResults.add(resLine);
+                }
+                return retResults;
             }
-            return retResults;
         }
     }
 
@@ -341,10 +344,11 @@ public class DatabaseServiceImpl implements DatabaseService {
                                                            String catalogName,
                                                            String schemaName,
                                                            String tableName) {
-        try (Connection con = establishConnection(connectionProperties)) {
+        try (Connection con = establishConnection(connectionProperties);
+             Statement statement = con.createStatement()) {
             final String fullTableName = createFullTableName(catalogName, schemaName, tableName);
             return listColumns(con, catalogName, schemaName, tableName).stream()
-                    .map(i -> computeStatistics(fullTableName, con, i))
+                    .map(i -> computeStatistics(fullTableName, statement, i))
                     .collect(Collectors.toList());
         }
     }
@@ -364,11 +368,12 @@ public class DatabaseServiceImpl implements DatabaseService {
                                                    String catalogName,
                                                    String schemaName,
                                                    String tableName) {
-        try (Connection con = establishConnection(connectionProperties)) {
-            final String fullTableName = createFullTableName(catalogName, schemaName, tableName);
-            ResultSet resultSet = con.createStatement().executeQuery(
-                    String.format("select count(*) from %s", fullTableName)
-            );
+        final String fullTableName = createFullTableName(catalogName, schemaName, tableName);
+        try (Connection con = establishConnection(connectionProperties);
+             Statement statement = con.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     String.format("select count(*) from %s", fullTableName)
+             )) {
             if (resultSet.next()) {
                 final Integer rowCount = resultSet.getInt(1);
                 List<TableColumn> columns = listColumns(con, catalogName, schemaName, tableName);
@@ -387,29 +392,30 @@ public class DatabaseServiceImpl implements DatabaseService {
      * Compute column statistics for given table column. Supported statistics are: min, max and number of null entries
      *
      * @param fullTableName full table name
-     * @param con           connection used for database communication
+     * @param statement     statement for execution
      * @param tableColumn   column to be evaluated
      * @return statistics for given column
      */
     @SneakyThrows
-    private ColumnStatistics computeStatistics(String fullTableName, Connection con, TableColumn tableColumn) {
+    private ColumnStatistics computeStatistics(String fullTableName, Statement statement, TableColumn tableColumn) {
         final String columnName = tableColumn.getName();
-        final ResultSet rs = con.createStatement().executeQuery(
+        try (ResultSet rs = statement.executeQuery(
                 String.format(
                         "select min(%1$s), max(%1$s), " +
                                 "sum(case when %1$s is null then 1 else 0 end) from %2$s",
                         columnName,
                         fullTableName)
-        );
-        if (rs.next()) {
-            return new ColumnStatistics(
-                    columnName,
-                    rs.getString(1),
-                    rs.getString(2),
-                    rs.getInt(3)
-            );
-        } else {
-            throw new IllegalStateException("Count does not have any results");
+        )) {
+            if (rs.next()) {
+                return new ColumnStatistics(
+                        columnName,
+                        rs.getString(1),
+                        rs.getString(2),
+                        rs.getInt(3)
+                );
+            } else {
+                throw new IllegalStateException("Count does not have any results");
+            }
         }
     }
 

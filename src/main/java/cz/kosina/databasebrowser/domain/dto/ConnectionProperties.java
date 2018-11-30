@@ -1,6 +1,8 @@
 package cz.kosina.databasebrowser.domain.dto;
 
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import javax.validation.constraints.NotNull;
 
@@ -8,6 +10,8 @@ import javax.validation.constraints.NotNull;
  * Properties for connection definition
  */
 @Data
+@AllArgsConstructor
+@NoArgsConstructor
 public class ConnectionProperties {
     /**
      * Name of the connection

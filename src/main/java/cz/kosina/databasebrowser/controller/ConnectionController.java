@@ -21,7 +21,8 @@ import javax.validation.Valid;
 @SuppressWarnings("unused")
 @RestController
 @RequestMapping("connections")
-@Api(value = "Connections", description = "Operations for storing and retrieving database connections.")
+@Api(tags = {"Connections"})
+//description = "Operations for storing and retrieving database connections."
 public class ConnectionController {
 
     /**
@@ -53,9 +54,9 @@ public class ConnectionController {
             @ApiResponse(code = 500, message = "Usually if version is outdated"),
     })
     @PutMapping
-    public ResponseEntity<ConnectionProperties> update(@RequestBody @Valid ConnectionProperties connectionProperties) {
+    public ResponseEntity update(@RequestBody @Valid ConnectionProperties connectionProperties) {
         return connectionService.update(connectionProperties)
-                .map(ResponseEntity::ok)
+                .map(i -> new ResponseEntity<>(HttpStatus.OK))
                 .orElseGet(() -> new ResponseEntity<>(HttpStatus.NOT_FOUND));
     }
 
